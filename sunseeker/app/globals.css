@@ -1,30 +1,109 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-@import "keen-slider/keen-slider.min.css";
+@import "tailwindcss";
 
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+  /* Riservato ai numeri grandi dell'eroe e ai titoli di sezione */
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Superficie profonda su cui poggia il contenuto sotto il cielo */
+  --color-ink-950: #03060d;
+  --color-ink-900: #05090f;
+  --color-ink-850: #080e1a;
+  --color-ink-800: #0b1322;
+  --color-ink-700: #111b2e;
+  --color-ink-600: #1a273f;
+
+  /* Accento solare */
+  --color-sun-100: #fff6de;
+  --color-sun-200: #ffe9b0;
+  --color-sun-300: #ffd470;
+  --color-sun-400: #ffb930;
+  --color-sun-500: #f59a05;
+  --color-sun-600: #cf7a02;
+
+  --animate-drift: drift 24s ease-in-out infinite;
+  --animate-twinkle: twinkle 4s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.8s linear infinite;
+  --animate-rise: rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(2%, -1.5%, 0) scale(1.06); }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 1; }
+}
+
+@keyframes shimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(100%); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Registrare i colori del cielo li rende interpolabili: il passaggio fra due
+   momenti della giornata (o fra due città) diventa una dissolvenza, non uno stacco. */
+@property --sky-top    { syntax: "<color>"; inherits: false; initial-value: #05090f; }
+@property --sky-mid    { syntax: "<color>"; inherits: false; initial-value: #0b1322; }
+@property --sky-bottom { syntax: "<color>"; inherits: false; initial-value: #111b2e; }
+@property --sky-glow   { syntax: "<color>"; inherits: false; initial-value: #ffb930; }
+
+/* Ombra morbida che stacca il testo bianco dal cielo chiaro di mezzogiorno */
+@utility text-glow {
+  text-shadow: 0 1px 3px rgb(2 6 15 / 0.55), 0 2px 30px rgb(2 6 15 / 0.45);
+}
+
+@utility surface {
+  background: color-mix(in oklab, var(--color-ink-850) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.07);
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--color-ink-950);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  color: #fff;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Il cielo è già l'elemento di contrasto: la barra di scorrimento sparisce */
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::selection {
+  background: var(--color-sun-400);
+  color: var(--color-ink-950);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-sun-300);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

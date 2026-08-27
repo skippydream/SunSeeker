@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sun Seeker
 
-## Getting Started
+Quanto sole c'è davvero — oggi e nei prossimi sette giorni, dove sei o in qualsiasi città.
 
-First, run the development server:
+Il cielo dell'app segue il sole reale della località mostrata: colori, stelle e
+posizione del bagliore sono calcolati dall'elevazione solare, non da un orario fisso.
+
+## Il dato principale
+
+Le ore di sole vengono dalla misura `sunshine_duration` di Open-Meteo, cioè il tempo
+in cui l'irraggiamento diretto supera i 120 W/m².
+
+Non è la stessa cosa di `ore di luce × (1 − nuvolosità)`: la nuvolosità media è un
+pessimo proxy della radiazione diretta. Milano, 27 agosto 2026 — nuvolosità media 72%,
+che con quella formula darebbe 3,8 ore di sole. Il valore misurato è 11,7 ore.
+
+## Cosa mostra
+
+- **Oggi** — ore di sole, arco solare con le ore soleggiate dipinte sopra, alba e
+  tramonto con golden hour e ora blu, quanta luce si guadagna o si perde rispetto a ieri.
+- **Sette giorni** — una striscia oraria per giorno: si vede *quando* ci sarà sole,
+  non solo quanto, e quando invece pioverà. Toccando un giorno si apre il dettaglio
+  ora per ora.
+- **Luna** — fase corrente, percentuale illuminata, età, sorgere e tramontare,
+  prossima luna piena e nuova, e le fasi delle sette notti successive.
+
+## Come funziona
+
+| | |
+|---|---|
+| Previsioni | [Open-Meteo](https://open-meteo.com) — nessuna chiave API |
+| Modello, primi 3 giorni | ICON-2I (ItaliaMeteo · ARPAE-SIMC), 2,2 km |
+| Modello, oltre | best match Open-Meteo (ECMWF / ICON) |
+| Accordo sulla pioggia | ICON-2I, ICON, ECMWF IFS, GFS |
+| Ricerca città | Open-Meteo Geocoding |
+| Posizione del sole | NOAA Solar Position, calcolata in locale (`lib/sun.ts`) |
+| Fase e orari della luna | Meeus a bassa precisione, in locale (`lib/moon.ts`) |
+
+Golden hour, ora blu e gli orari lunari non arrivano da un servizio: sono calcolati
+cercando gli attraversamenti delle soglie di elevazione lungo la giornata locale.
+
+Gli orari restano nel fuso della località: le stringhe di Open-Meteo non passano mai
+da `new Date()`, che le reinterpreterebbe nel fuso del browser.
+
+Le coordinate rilevate dal GPS vanno solo a Open-Meteo, che serve per avere le
+previsioni. Non c'è reverse geocoding: una posizione rilevata si chiama "La tua
+posizione", con le coordinate come sottotitolo.
+
+## Scelta del modello
+
+I primi tre giorni usano **ICON-2I**, il modello ad area limitata di
+ItaliaMeteo/ARPAE-SIMC: 2,2 km sull'Italia contro gli ~11 km di ECMWF. Oltre il terzo
+giorno ICON-2I non ha più dati e si torna al best match di Open-Meteo. Indice UV e
+probabilità di precipitazione vengono sempre dalla previsione di base, perché ICON-2I
+non li produce. Fuori dal dominio italiano ICON-2I restituisce valori nulli e lo strato
+semplicemente non si applica: nessun controllo geografico da mantenere.
+
+Sui siti meteo italiani più noti: **non esiste un'API pubblica utilizzabile**. iLMeteo e
+3bmeteo vendono i dati in B2B su contratto; l'Aeronautica Militare li cede solo per
+convenzione a pagamento e vieta esplicitamente la cessione a terzi dei dati originali,
+il che rende impossibile ridistribuirli in un'app pubblica. Nessuno dei tre produce
+comunque previsioni originali: post-processano gli stessi modelli numerici pubblici.
+
+## Accordo fra modelli
+
+Un solo numero nasconde quanto è incerta una previsione. Per la pioggia interroghiamo
+quattro centri indipendenti e mostriamo quanti concordano. Milano, 28 agosto 2026:
+ICON-2I 0,5 mm, ICON 0,3 mm, ECMWF 1,2 mm, GFS 2,5 mm — un fattore cinque.
+
+Quando l'accordo scende sotto il 75% il giorno viene marcato come incerto, con il
+contorno tratteggiato sull'etichetta della pioggia.
+
+## Giorni di pioggia
+
+Un giorno è di pioggia in base ai **millimetri**, non alla probabilità: capita spesso
+di avere il 45% di probabilità e zero millimetri (nebbia, nuvole basse). La soglia è
+2 mm per "giorno di pioggia", 15 mm per "pioggia forte".
+
+Quando piove sul serio la riga del giorno viene marcata, le ore di sole scendono di un
+gradino nella gerarchia visiva e la striscia oraria mostra in blu *quando* piove.
+
+## Sviluppo
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Poi apri [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build   # build di produzione
+npm run lint    # ESLint
+npx tsc --noEmit  # controllo dei tipi
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js 16 (App Router), React 19, Tailwind CSS 4. Nessuna dipendenza runtime oltre
+a React e Next.
 
-## Learn More
+Font: **Fraunces** per i numeri grandi (serif ad alto contrasto, regge sul cielo chiaro
+di mezzogiorno), **Inter** per l'interfaccia, **JetBrains Mono** per orari e misure, che
+hanno bisogno di cifre a larghezza fissa.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+L'icona è `app/icon.svg`: sole e arco, gli stessi dell'eroe, ridotti al minimo perché
+restino distinti a 16 px.
