@@ -1,12 +1,28 @@
-import { NextResponse } from "next/server";
-import { lightWindows } from "@/lib/sun";
-import { classifyRain, consensusOf } from "@/lib/weather";
-import type { DayForecast, Forecast, HourPoint, Place, RainConsensus } from "@/lib/weather";
+/**
+ * Chiamate a Open-Meteo dal browser.
+ *
+ * Il sito è pubblicato come export statico (GitHub Pages non esegue Node), quindi
+ * non c'è un backend dove far passare queste richieste. Non è un problema:
+ * Open-Meteo non richiede chiavi e risponde con `access-control-allow-origin: *`.
+ */
 
-const MILANO = { lat: 45.4642, lon: 9.19, name: "Milano", region: "Lombardia", countryCode: "IT" };
+import { lightWindows } from "./sun";
+import { classifyRain, consensusOf } from "./weather";
+import type { DayForecast, Forecast, HourPoint, Place, RainConsensus } from "./weather";
+
+const ROOT = "https://api.open-meteo.com/v1/forecast";
+const GEOCODING = "https://geocoding-api.open-meteo.com/v1/search";
 
 const FORECAST_DAYS = 7;
 const PAST_DAYS = 1; // serve solo a confrontare la luce con ieri
+
+export const DEFAULT_PLACE: Place = {
+  name: "Milano",
+  region: "Lombardia",
+  countryCode: "IT",
+  latitude: 45.4642,
+  longitude: 9.19,
+};
 
 const DAILY = [
   "sunrise",
@@ -95,55 +111,89 @@ interface ConsensusResponse {
   daily: Record<string, (number | null)[] | string[]>;
 }
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-
-  const lat = numberParam(searchParams.get("lat"), MILANO.lat, -90, 90);
-  const lon = numberParam(searchParams.get("lon"), MILANO.lon, -180, 180);
-  const isDefaultLocation = !searchParams.get("lat") && !searchParams.get("lon");
-
-  const common = `latitude=${lat}&longitude=${lon}&timezone=auto&forecast_days=${FORECAST_DAYS}&past_days=${PAST_DAYS}`;
-  const root = "https://api.open-meteo.com/v1/forecast";
-
-  try {
-    // La previsione di base è l'unica indispensabile; gli altri due strati
-    // migliorano il risultato ma la loro assenza non deve far fallire nulla.
-    const [base, overlay, consensus] = await Promise.all([
-      getJson<BaseResponse>(`${root}?${common}&daily=${DAILY}&hourly=${HOURLY}`),
-      getJson<OverlayResponse>(
-        `${root}?${common}&daily=${ITALY_DAILY}&hourly=${ITALY_HOURLY}&models=${ITALY_MODEL}`
-      ).catch(() => null),
-      getJson<ConsensusResponse>(
-        `${root}?${common}&daily=precipitation_sum&models=${CONSENSUS_MODELS.join(",")}`
-      ).catch(() => null),
-    ]);
-
-    const place = resolvePlace(searchParams, lat, lon, isDefaultLocation);
-
-    return NextResponse.json(buildForecast(base, overlay, consensus, place), {
-      headers: { "Cache-Control": "public, max-age=300, stale-while-revalidate=900" },
-    });
-  } catch (e) {
-    const message =
-      e instanceof HttpError
-        ? `Il servizio meteo ha risposto ${e.status}.`
-        : "Non riesco a contattare il servizio meteo.";
-    return NextResponse.json({ error: message }, { status: 502 });
-  }
+interface GeocodingResult {
+  name: string;
+  latitude: number;
+  longitude: number;
+  country?: string;
+  country_code?: string;
+  admin1?: string;
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number) {
-    super(`HTTP ${status}`);
-  }
-}
+export class ForecastError extends Error {}
 
-async function getJson<T>(url: string): Promise<T> {
-  // Il modello si aggiorna a intervalli lunghi: 15 minuti di cache tolgono una
-  // chiamata a ogni refresh senza mostrare dati stantii.
-  const res = await fetch(url, { next: { revalidate: 900 } });
-  if (!res.ok) throw new HttpError(res.status);
+async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new ForecastError(`Il servizio meteo ha risposto ${res.status}.`);
   return res.json() as Promise<T>;
+}
+
+export interface ForecastRequest {
+  latitude: number;
+  longitude: number;
+  /** Località scelta dalla ricerca; assente per una posizione rilevata dal GPS. */
+  place?: Place;
+  signal?: AbortSignal;
+}
+
+export async function loadForecast({
+  latitude,
+  longitude,
+  place,
+  signal,
+}: ForecastRequest): Promise<Forecast> {
+  const common = `latitude=${latitude}&longitude=${longitude}&timezone=auto&forecast_days=${FORECAST_DAYS}&past_days=${PAST_DAYS}`;
+
+  // La previsione di base è l'unica indispensabile; gli altri due strati
+  // migliorano il risultato ma la loro assenza non deve far fallire nulla.
+  const [base, overlay, consensus] = await Promise.all([
+    getJson<BaseResponse>(`${ROOT}?${common}&daily=${DAILY}&hourly=${HOURLY}`, signal),
+    getJson<OverlayResponse>(
+      `${ROOT}?${common}&daily=${ITALY_DAILY}&hourly=${ITALY_HOURLY}&models=${ITALY_MODEL}`,
+      signal
+    ).catch(() => null),
+    getJson<ConsensusResponse>(
+      `${ROOT}?${common}&daily=precipitation_sum&models=${CONSENSUS_MODELS.join(",")}`,
+      signal
+    ).catch(() => null),
+  ]);
+
+  return buildForecast(base, overlay, consensus, place ?? detectedPlace(latitude, longitude));
+}
+
+/** Ricerca città. Restituisce una lista vuota su errore: non è un percorso critico. */
+export async function searchPlaces(query: string, signal?: AbortSignal): Promise<Place[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const data = await getJson<{ results?: GeocodingResult[] }>(
+    `${GEOCODING}?name=${encodeURIComponent(q)}&count=6&language=it&format=json`,
+    signal
+  );
+  return (data.results ?? []).map((r) => ({
+    name: r.name,
+    region: r.admin1,
+    country: r.country,
+    countryCode: r.country_code,
+    latitude: r.latitude,
+    longitude: r.longitude,
+  }));
+}
+
+/**
+ * Per una posizione rilevata dal GPS non facciamo reverse geocoding:
+ * significherebbe mandare le coordinate dell'utente a un servizio terzo solo
+ * per scrivere un nome di città.
+ */
+function detectedPlace(latitude: number, longitude: number): Place {
+  const ns = latitude >= 0 ? "N" : "S";
+  const ew = longitude >= 0 ? "E" : "O";
+  return {
+    name: "La tua posizione",
+    region: `${Math.abs(latitude).toFixed(2)}°${ns}, ${Math.abs(longitude).toFixed(2)}°${ew}`,
+    latitude,
+    longitude,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,15 +213,15 @@ function buildForecast(
     // Preferiamo ICON-2I quando ha un valore per quel giorno: fuori dal suo
     // dominio e oltre il terzo giorno restituisce null e restiamo sulla base.
     const od = overlay?.daily;
-    const pick = <K extends keyof DailyBlock>(key: K, index = i): number | null => {
+    const pick = <K extends keyof DailyBlock>(key: K): number | null => {
       const fine = od?.[key] as (number | null)[] | undefined;
-      const value = fine?.[index];
+      const value = fine?.[i];
       if (value !== null && value !== undefined) return value as number;
-      const fallback = (d[key] as (number | null)[])[index];
-      return fallback ?? null;
+      return ((d[key] as (number | null)[])[i] ?? null) as number | null;
     };
 
-    const fromItalyModel = od?.sunshine_duration?.[i] !== null && od?.sunshine_duration?.[i] !== undefined;
+    const fromItalyModel =
+      od?.sunshine_duration?.[i] !== null && od?.sunshine_duration?.[i] !== undefined;
     if (fromItalyModel && i >= PAST_DAYS) highResolutionDays++;
 
     const sunHours = (pick("sunshine_duration") ?? 0) / 3600;
@@ -226,7 +276,10 @@ function buildForecast(
 }
 
 /** Unisce le ore della previsione di base con quelle, più fini, di ICON-2I. */
-function groupHours(base: HourlyBlock, overlay: OverlayResponse["hourly"] | null): Map<string, HourPoint[]> {
+function groupHours(
+  base: HourlyBlock,
+  overlay: OverlayResponse["hourly"] | null
+): Map<string, HourPoint[]> {
   const byDate = new Map<string, HourPoint[]>();
 
   for (let i = 0; i < base.time.length; i++) {
@@ -237,7 +290,7 @@ function groupHours(base: HourlyBlock, overlay: OverlayResponse["hourly"] | null
     const fine = <K extends keyof HourlyBlock>(key: K): number | null => {
       const value = (overlay?.[key] as (number | null)[] | undefined)?.[i];
       if (value !== null && value !== undefined) return value as number;
-      return (base[key] as (number | null)[])[i] ?? null;
+      return ((base[key] as (number | null)[])[i] ?? null) as number | null;
     };
 
     const point: HourPoint = {
@@ -282,58 +335,3 @@ function rainWindowOf(hours: HourPoint[]): { start: number; end: number } | null
 
 /** "2026-08-27T06:38" -> "06:38" */
 const timeOf = (iso: string) => iso.slice(11, 16);
-
-function numberParam(value: string | null, fallback: number, min: number, max: number): number {
-  if (value === null) return fallback;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < min || n > max) return fallback;
-  return n;
-}
-
-/**
- * Il nome arriva dalla ricerca quando c'è. Per una posizione rilevata dal GPS
- * non facciamo reverse geocoding: significherebbe mandare le coordinate
- * dell'utente a un servizio terzo solo per scrivere un nome di città. La
- * etichettiamo per quello che è, con le coordinate a fare da sottotitolo.
- */
-function resolvePlace(
-  params: URLSearchParams,
-  lat: number,
-  lon: number,
-  isDefaultLocation: boolean
-): Place {
-  const given = params.get("name");
-  if (given) {
-    return {
-      name: given,
-      region: params.get("region") ?? undefined,
-      countryCode: params.get("country") ?? undefined,
-      latitude: lat,
-      longitude: lon,
-    };
-  }
-
-  if (isDefaultLocation) {
-    return {
-      name: MILANO.name,
-      region: MILANO.region,
-      countryCode: MILANO.countryCode,
-      latitude: lat,
-      longitude: lon,
-    };
-  }
-
-  return {
-    name: "La tua posizione",
-    region: formatCoordinates(lat, lon),
-    latitude: lat,
-    longitude: lon,
-  };
-}
-
-/** 45.4642, 9.19 -> "45.46°N, 9.19°E" */
-function formatCoordinates(lat: number, lon: number): string {
-  const ns = lat >= 0 ? "N" : "S";
-  const ew = lon >= 0 ? "E" : "O";
-  return `${Math.abs(lat).toFixed(2)}°${ns}, ${Math.abs(lon).toFixed(2)}°${ew}`;
-}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { searchPlaces } from "@/lib/forecast";
 import type { Place } from "@/lib/weather";
 
 interface Props {
@@ -58,11 +59,7 @@ export default function LocationSearch({
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`, {
-          signal: controller.signal,
-        });
-        const places: Place[] = await res.json();
-        setResults(places);
+        setResults(await searchPlaces(q, controller.signal));
         setActive(0);
       } catch {
         // richiesta annullata o rete assente: la tendina resta com'è

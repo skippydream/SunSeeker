@@ -9,6 +9,7 @@ import SunArc from "@/components/SunArc";
 import SunTimes from "@/components/SunTimes";
 import { DropIcon } from "@/components/RainBadge";
 import { skyTheme, solarPosition } from "@/lib/sun";
+import { DEFAULT_PLACE, loadForecast } from "@/lib/forecast";
 import type { Forecast, Place } from "@/lib/weather";
 import {
   consensusLabel,
@@ -23,6 +24,13 @@ import {
 import { minutesToClock } from "@/lib/sun";
 
 type Status = "loading" | "ready" | "error";
+
+/** Località di partenza quando la posizione non è disponibile. */
+const DEFAULT_REQUEST = {
+  latitude: DEFAULT_PLACE.latitude,
+  longitude: DEFAULT_PLACE.longitude,
+  place: DEFAULT_PLACE,
+};
 
 export default function Home() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
@@ -44,12 +52,13 @@ export default function Home() {
    * essere chiamata anche dall'effetto di avvio senza innescare render a cascata.
    */
   const fetchForecast = useCallback(
-    async (params: string, fallbackNotice: string | null = null) => {
+    async (
+      request: { latitude: number; longitude: number; place?: Place },
+      fallbackNotice: string | null = null
+    ) => {
       try {
-        const res = await fetch(`/api/weather${params}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Richiesta non riuscita.");
-        setForecast(data as Forecast);
+        const data = await loadForecast(request);
+        setForecast(data);
         setNotice(fallbackNotice);
         setError(null);
         setStatus("ready");
@@ -63,10 +72,13 @@ export default function Home() {
 
   /** Come sopra, ma riporta subito la pagina in caricamento: per i clic. */
   const load = useCallback(
-    (params: string, fallbackNotice: string | null = null) => {
+    (
+      request: { latitude: number; longitude: number; place?: Place },
+      fallbackNotice: string | null = null
+    ) => {
       setStatus("loading");
       setError(null);
-      void fetchForecast(params, fallbackNotice);
+      void fetchForecast(request, fallbackNotice);
     },
     [fetchForecast]
   );
@@ -74,18 +86,18 @@ export default function Home() {
   /** Richiesta esplicita dell'utente: qui lo spinner ha senso. */
   const locate = useCallback(() => {
     if (!("geolocation" in navigator)) {
-      void load("", "Il browser non espone la posizione: ecco Milano.");
+      void load(DEFAULT_REQUEST, "Il browser non espone la posizione: ecco Milano.");
       return;
     }
     setGeoBusy(true);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGeoBusy(false);
-        void load(`?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
+        void load({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       },
       () => {
         setGeoBusy(false);
-        void load("", "Non riesco a leggere la posizione. Controlla i permessi del browser.");
+        void load(DEFAULT_REQUEST, "Non riesco a leggere la posizione. Controlla i permessi del browser.");
       },
       { timeout: 8000, maximumAge: 300_000 }
     );
@@ -98,14 +110,14 @@ export default function Home() {
     if (!("geolocation" in navigator)) {
       // fetchForecast aggiorna lo stato solo dopo l'await: nessun render a cascata.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      void fetchForecast("", "Il browser non espone la posizione: ecco Milano.");
+      void fetchForecast(DEFAULT_REQUEST, "Il browser non espone la posizione: ecco Milano.");
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) => void fetchForecast(`?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`),
+      (pos) => void fetchForecast({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
       () =>
         void fetchForecast(
-          "",
+          DEFAULT_REQUEST,
           "Posizione non disponibile: intanto ecco Milano. Cerca la tua città in alto."
         ),
       { timeout: 8000, maximumAge: 300_000 }
@@ -114,14 +126,7 @@ export default function Home() {
 
   const selectPlace = useCallback(
     (place: Place) => {
-      const params = new URLSearchParams({
-        lat: String(place.latitude),
-        lon: String(place.longitude),
-        name: place.name,
-      });
-      if (place.region) params.set("region", place.region);
-      if (place.countryCode) params.set("country", place.countryCode);
-      void load(`?${params}`);
+      void load({ latitude: place.latitude, longitude: place.longitude, place });
       setExpanded(null);
     },
     [load]

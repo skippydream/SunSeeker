@@ -1,0 +1,61 @@
+name: Pubblica su GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Una pubblicazione alla volta; le eseguzioni in coda vengono sostituite.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sunseeker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sunseeker/package-lock.json
+
+      - run: npm ci
+
+      # `next build` controlla già i tipi. Va prima del lint perché genera
+      # next-env.d.ts, che non è versionato.
+      - run: npm run build
+        env:
+          # Il sito è servito da /SunSeeker/, non dalla radice del dominio.
+          NEXT_PUBLIC_BASE_PATH: /SunSeeker
+
+      - run: npm run lint
+
+      # Impedisce a Pages di ignorare la cartella _next/ come file Jekyll.
+      - run: touch out/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: sunseeker/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

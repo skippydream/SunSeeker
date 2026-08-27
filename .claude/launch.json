@@ -4,7 +4,12 @@
     {
       "name": "sunseeker",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "sunseeker", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "sunseeker",
+        "run",
+        "dev"
+      ],
       "port": 3000
     }
   ]

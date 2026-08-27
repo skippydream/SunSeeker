@@ -79,6 +79,32 @@ di avere il 45% di probabilità e zero millimetri (nebbia, nuvole basse). La sog
 Quando piove sul serio la riga del giorno viene marcata, le ore di sole scendono di un
 gradino nella gerarchia visiva e la striscia oraria mostra in blu *quando* piove.
 
+## Pubblicazione
+
+Il sito è su GitHub Pages: **https://skippydream.github.io/SunSeeker/**
+
+Pages serve solo file statici, quindi non ci sono route API: le previsioni si
+chiedono a Open-Meteo direttamente dal browser (`lib/forecast.ts`). Si può fare
+perché Open-Meteo non richiede chiavi e risponde con `access-control-allow-origin: *`.
+Senza chiavi da proteggere, un backend non aggiungerebbe nulla.
+
+Ogni push su `main` fa partire `.github/workflows/deploy.yml`, che controlla tipi e
+lint, compila con `NEXT_PUBLIC_BASE_PATH=/SunSeeker` e pubblica la cartella `out/`.
+
+Il prefisso serve perché su Pages il sito vive in una sottocartella, non alla radice
+del dominio. In sviluppo la variabile non è impostata e il sito sta alla radice.
+
+Per provare in locale esattamente com'è in produzione:
+
+```bash
+NEXT_PUBLIC_BASE_PATH=/SunSeeker npm run build
+mkdir -p /tmp/pages && cp -R out /tmp/pages/SunSeeker
+python3 -m http.server 4321 --directory /tmp/pages
+```
+
+Poi apri http://localhost:4321/SunSeeker/ — un `basePath` sbagliato si vede subito,
+perché la pagina si carica senza CSS.
+
 ## Sviluppo
 
 ```bash
